@@ -9,7 +9,7 @@ Servers are provided from https://www.open.mp/servers
 - ESC: Clear search term
 - BACKSPACE: Remove last character from search term
 - Any ASCII Key: Start a search with the key
-- F1: Show this page
+- F1: Show these instructions
 - F2: Refresh server list (available every minute)
 
 ![image](https://github.com/VIRUXE/openmp-server-browser/assets/1616657/7854d9a4-7b7b-42e5-86d2-3935b4e9e112)
