@@ -1,13 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
+﻿using System.Text.Json;
 
 static class Program {
+    static readonly HashSet<string> blacklist = new() { 
+        "107.175.134.251:7778", // LS City
+        "107.175.134.251:7777"  // LS City
+    };
+
     static async Task Main() {
         Console.Title = "open.mp Server Browser";
         Console.CursorVisible = false;
 
+        Console.Write("Downloading Servers...");
         List<Server> servers = await LoadServers();
 
         DateTime lastDownloadTime = DateTime.Now;
@@ -17,20 +20,25 @@ static class Program {
         int pageSize = Console.WindowHeight - 3;
 
         while (true) {
-            Console.Clear();
-            List<Server> filteredServers = servers
+            List<Server> filteredServers = new();
+
+            if (servers.Count > 0) {
+                Console.Clear();
+
+                filteredServers = servers
                 .Where(s =>
-                    string.IsNullOrEmpty(searchTerm) ||
-                    s.hn.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                    !blacklist.Contains(s.ip) &&
+                    (s.hn.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
                     s.gm.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                    s.ip.Contains(searchTerm))
+                    s.ip.Contains(searchTerm)))
                 .OrderByDescending(s => s.pc)
                 .ToList();
 
-            // Display selected server
-            for (int i = offset; i < Math.Min(offset + pageSize, filteredServers.Count); i++) Console.WriteLine($"{(i == currentIndex ? ">" : " ")} {filteredServers[i]}");
+                // Display selected server
+                for (int i = offset; i < Math.Min(offset + pageSize, filteredServers.Count); i++) Console.WriteLine($"{(i == currentIndex ? ">" : " ")} {filteredServers[i]}");
 
-            Console.WriteLine($"\nSearch Term: {searchTerm}");
+                Console.WriteLine($"\nSearch Term: {searchTerm}");
+            }
 
             ConsoleKeyInfo keyInfo = Console.ReadKey(intercept: true);
 
@@ -43,7 +51,7 @@ static class Program {
                 Console.WriteLine("ENTER: Enter the selected server");
                 Console.WriteLine("ESC: Clear search term");
                 Console.WriteLine("BACKSPACE: Remove last character from search term");
-                Console.WriteLine("Any ASCII Key: Start a search with the key");
+                Console.WriteLine("Any ASCII Key: Start a search with the key (search name, gamemode and address)");
                 Console.WriteLine("F1: Show this page");
                 Console.WriteLine("F2: Refresh server list (available every minute)");
 
@@ -88,9 +96,18 @@ static class Program {
     }
 
     static async Task<List<Server>> LoadServers() {
-        string response = await new System.Net.Http.HttpClient().GetStringAsync("https://api.open.mp/servers");
-        return System.Text.Json.JsonSerializer.Deserialize<List<Server>>(response) ?? new List<Server>();
+        try {
+            string response = await new HttpClient().GetStringAsync("https://api.open.mp/servers");
+            return JsonSerializer.Deserialize<List<Server>>(response) ?? new List<Server>();
+        } catch (HttpRequestException e) {
+            Console.WriteLine($"Request error: {e.Message}");
+        } catch (JsonException e) {
+            Console.WriteLine($"JSON error: {e.Message}");
+        }
+
+        return new List<Server>();
     }
+
 
     static void StartServer(string[] args) {
         if (Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\SAMP", "gta_sa_exe", null) is string gamePath) System.Diagnostics.Process.Start($"{System.IO.Path.GetDirectoryName(gamePath)}\\samp.exe", $"{args[0]} {args[1]}");
