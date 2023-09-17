@@ -1,6 +1,12 @@
-﻿using System.Text.Json;
+﻿using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using static Program;
 
 static class Program {
+    private static List<Server> favorites = new();
+    private static List<Server> filteredServers = new();
+
     static readonly HashSet<string> blacklist = new() { 
         "107.175.134.251:7778", // LS City
         "107.175.134.251:7777"  // LS City
@@ -11,7 +17,9 @@ static class Program {
         Console.CursorVisible = false;
 
         Console.Write("Downloading Servers...");
-        List<Server> servers = await LoadServers();
+        List<Server> servers = await FetchServerList();
+
+        favorites = GetFavoritesFromJson();
 
         DateTime lastDownloadTime = DateTime.Now;
         string searchTerm = "";
@@ -20,22 +28,30 @@ static class Program {
         int pageSize = Console.WindowHeight - 3;
 
         while (true) {
-            List<Server> filteredServers = new();
-
             if (servers.Count > 0) {
+                UpdateFavoriteServersInfo(servers);
+
                 Console.Clear();
 
-                filteredServers = servers
-                .Where(s =>
-                    !blacklist.Contains(s.ip) &&
-                    (s.hn.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                    s.gm.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
-                    s.ip.Contains(searchTerm)))
-                .OrderByDescending(s => s.pc)
+                filteredServers = favorites.Concat(servers)
+                .Where(s => !blacklist.Contains(s.ip) &&
+                            (s.hn.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                             s.gm?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) == true ||
+                             s.ip.Contains(searchTerm)))
+                .OrderByDescending(s => favorites.Contains(s) ? int.MaxValue : (s.pc ?? 0))
                 .ToList();
 
                 // Display selected server
-                for (int i = offset; i < Math.Min(offset + pageSize, filteredServers.Count); i++) Console.WriteLine($"{(i == currentIndex ? ">" : " ")} {filteredServers[i]}");
+                for (int i = offset; i < Math.Min(offset + pageSize, filteredServers.Count); i++) {
+                    if (favorites.Any(f => f.ip == filteredServers[i].ip)) {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($"{(i == currentIndex ? ">" : " ")} {filteredServers[i].ToSimpleString()}");
+                    } else {
+                        Console.WriteLine($"{(i == currentIndex ? ">" : " ")} {filteredServers[i]}");
+                    }
+                    Console.ResetColor();
+                }
+
 
                 Console.WriteLine($"\nSearch Term: {searchTerm}");
             }
@@ -63,11 +79,17 @@ static class Program {
 
                 continue;
             } else if (keyInfo.Key == ConsoleKey.F2) {
-                servers = await LoadServers();
+                servers = await FetchServerList();
                 currentIndex = 0;
                 offset = 0;
                 searchTerm = "";
 
+                continue;
+            } else if (keyInfo.Key == ConsoleKey.RightArrow) {
+                SaveFavorite(filteredServers[currentIndex]);
+                continue;
+            } else if (keyInfo.Key == ConsoleKey.LeftArrow) {
+                RemoveFavorite(filteredServers[currentIndex]);
                 continue;
             } else if (keyInfo.Key == ConsoleKey.UpArrow) {
                 currentIndex = (currentIndex > 0) ? currentIndex - 1 : 0;
@@ -95,7 +117,7 @@ static class Program {
         }
     }
 
-    static async Task<List<Server>> LoadServers() {
+    static async Task<List<Server>> FetchServerList() {
         try {
             string response = await new HttpClient().GetStringAsync("https://api.open.mp/servers");
             return JsonSerializer.Deserialize<List<Server>>(response) ?? new List<Server>();
@@ -108,6 +130,49 @@ static class Program {
         return new List<Server>();
     }
 
+    static void UpdateFavoriteServersInfo(List<Server> servers) {
+        var serverDictionary = servers.ToDictionary(s => s.ip, s => s);
+
+        foreach (var favorite in favorites) {
+            if (serverDictionary.TryGetValue(favorite.ip, out var server)) {
+                favorite.hn = server.hn;
+                favorite.pc = server.pc;
+                favorite.pm = server.pm;
+                favorite.gm = server.gm;
+                favorite.la = server.la;
+                favorite.pa = server.pa;
+                favorite.vn = server.vn;
+            }
+        }
+    }
+
+    static void SaveFavorite(Server server) {
+        if (!favorites.Contains(server)) {
+            favorites.Add(server);
+            File.WriteAllText("openmp.json", JsonSerializer.Serialize(new { favorites }));
+        }
+    }
+
+    static void RemoveFavorite(Server server) {
+        if (favorites.Contains(server)) {
+            favorites.Remove(server);
+            File.WriteAllText("openmp.json", JsonSerializer.Serialize(new { favorites }));
+        }
+    }
+
+    static List<Server> GetFavoritesFromJson() {
+        string path = "openmp.json";
+
+        if (File.Exists(path)) {
+            string json = File.ReadAllText(path);
+
+            var data = JsonSerializer.Deserialize<Dictionary<string, List<Server>>>(json);
+
+            return data?["favorites"] ?? new List<Server>();
+        }
+
+        return new List<Server>();
+    }
 
     static void StartServer(string[] args) {
         if (Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\SAMP", "gta_sa_exe", null) is string gamePath) System.Diagnostics.Process.Start($"{System.IO.Path.GetDirectoryName(gamePath)}\\samp.exe", $"{args[0]} {args[1]}");
@@ -116,14 +181,15 @@ static class Program {
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Style", "IDE1006:Naming Styles", Justification = "<We're following the JSON format>")]
     public class Server {
         public required string ip { get; set; }
-        public required string hn { get; set; }
-        public required int pc { get; set; }
-        public required int pm { get; set; }
-        public required string gm { get; set; }
-        public required string la { get; set; }
-        public required bool pa { get; set; }
-        public required string vn { get; set; }
+        public string hn { get; set; }
+        public int? pc { get; set; }
+        public int? pm { get; set; }
+        public string? gm { get; set; }
+        public string? la { get; set; }
+        public bool? pa { get; set; }
+        public string? vn { get; set; }
 
         public override string ToString() => $"[{pc}/{pm}] {hn} ({gm})";
+        public string ToSimpleString() => $"{hn} ({gm ?? "Unknown"})";
     }
 }
